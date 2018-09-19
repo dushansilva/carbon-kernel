@@ -1,13 +1,13 @@
 /*
  * Copyright (c) 2005-2010, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
- * 
+ *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -32,18 +32,17 @@ import javax.naming.AuthenticationException;
 import javax.naming.Context;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
-import javax.naming.TimeLimitExceededException;
 import javax.naming.directory.Attribute;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
 import javax.naming.directory.InitialDirContext;
+import javax.naming.ldap.Control;
 import javax.naming.ldap.InitialLdapContext;
 import javax.naming.ldap.LdapContext;
-import java.util.Arrays;
-import java.util.Hashtable;
-import java.util.Map;
-import java.util.SortedMap;
-import java.util.TreeMap;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.*;
 
 public class LDAPConnectionContext {
 
@@ -62,6 +61,17 @@ public class LDAPConnectionContext {
 
     private static final String READ_TIME_OUT = "ReadTimeout";
 
+    private static final Log timeLog = LogFactory.getLog("TIME_LOG");
+
+    private static String initialContextFactoryClass = "com.sun.jndi.dns.DnsContextFactory";
+
+    static {
+        String initialContextFactoryClassSystemProperty = System.getProperty(Context.INITIAL_CONTEXT_FACTORY);
+        if (initialContextFactoryClassSystemProperty != null && initialContextFactoryClassSystemProperty.length() > 0) {
+            initialContextFactoryClass = initialContextFactoryClassSystemProperty;
+        }
+    }
+
     @SuppressWarnings({"rawtypes", "unchecked"})
     public LDAPConnectionContext(RealmConfiguration realmConfig) throws UserStoreException {
 
@@ -73,7 +83,7 @@ public class LDAPConnectionContext {
                 throw new UserStoreException("DNS is enabled, but DNS domain name not provided.");
             } else {
                 environmentForDNS = new Hashtable();
-                environmentForDNS.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.dns.DnsContextFactory");
+                environmentForDNS.put(Context.INITIAL_CONTEXT_FACTORY, initialContextFactoryClass);
                 environmentForDNS.put("java.naming.provider.url", DNSUrl);
                 populateDCMap();
             }
@@ -167,8 +177,8 @@ public class LDAPConnectionContext {
             environment.put("com.sun.jndi.ldap.connect.timeout", "5000");
         }
 
-        if(StringUtils.isNotEmpty(readTimeout)){
-            environment.put("com.sun.jndi.ldap.read.timeout",readTimeout);
+        if (StringUtils.isNotEmpty(readTimeout)) {
+            environment.put("com.sun.jndi.ldap.read.timeout", readTimeout);
         }
     }
 
@@ -177,14 +187,14 @@ public class LDAPConnectionContext {
         //if dcMap is not populated, it is not DNS case
         if (dcMap == null) {
             try {
-                context = new InitialDirContext(environment);
+                context = getDirContext(environment);
 
             } catch (NamingException e) {
                 log.error("Error obtaining connection. " + e.getMessage(), e);
                 log.error("Trying again to get connection.");
 
                 try {
-                    context = new InitialDirContext(environment);
+                    context = getDirContext(environment);
                 } catch (Exception e1) {
                     log.error("Error obtaining connection for the second time" + e.getMessage(), e);
                     throw new UserStoreException("Error obtaining connection. " + e.getMessage(), e);
@@ -198,7 +208,7 @@ public class LDAPConnectionContext {
                 SRVRecord firstRecord = dcMap.get(firstKey);
                 //compose the connection URL
                 environment.put(Context.PROVIDER_URL, getLDAPURLFromSRVRecord(firstRecord));
-                context = new InitialDirContext(environment);
+                context = getDirContext(environment);
 
             } catch (NamingException e) {
                 log.error("Error obtaining connection to first Domain Controller." + e.getMessage(), e);
@@ -208,7 +218,7 @@ public class LDAPConnectionContext {
                     try {
                         SRVRecord srv = dcMap.get(integer);
                         environment.put(Context.PROVIDER_URL, getLDAPURLFromSRVRecord(srv));
-                        context = new InitialDirContext(environment);
+                        context = getDirContext(environment);
                         break;
                     } catch (NamingException e1) {
                         if (integer == (dcMap.lastKey())) {
@@ -220,8 +230,7 @@ public class LDAPConnectionContext {
                 }
             }
         }
-        return (context);
-
+        return context;
     }
 
     @SuppressWarnings("unchecked")
@@ -353,7 +362,7 @@ public class LDAPConnectionContext {
     /**
      * Returns the LDAPContext for the given credentials
      *
-     * @param userDN user DN
+     * @param userDN   user DN
      * @param password user password
      * @return returns the LdapContext instance if credentials are valid
      * @throws UserStoreException
@@ -395,7 +404,7 @@ public class LDAPConnectionContext {
         //if dcMap is not populated, it is not DNS case
         if (dcMap == null) {
             //replace environment properties with these credentials
-            context = new InitialLdapContext(tempEnv, null);
+            context = getLdapContext(tempEnv, null);
         } else if (dcMap != null && dcMap.size() != 0) {
             try {
                 //first try the first entry in dcMap, if it fails, try iteratively
@@ -403,7 +412,7 @@ public class LDAPConnectionContext {
                 SRVRecord firstRecord = dcMap.get(firstKey);
                 //compose the connection URL
                 tempEnv.put(Context.PROVIDER_URL, getLDAPURLFromSRVRecord(firstRecord));
-                context = new InitialLdapContext(tempEnv, null);
+                context = getLdapContext(tempEnv, null);
 
             } catch (AuthenticationException e) {
                 throw e;
@@ -415,7 +424,7 @@ public class LDAPConnectionContext {
                     try {
                         SRVRecord srv = dcMap.get(integer);
                         tempEnv.put(Context.PROVIDER_URL, getLDAPURLFromSRVRecord(srv));
-                        context = new InitialLdapContext(environment, null);
+                        context = getLdapContext(environment, null);
                         break;
                     } catch (AuthenticationException e1) {
                         throw e1;
@@ -429,5 +438,135 @@ public class LDAPConnectionContext {
             }
         }
         return context;
+    }
+
+    private DirContext getDirContext(Hashtable<?, ?> environment) throws NamingException {
+        if (CarbonUtils.getServerConfiguration().getFirstProperty("EnableTimingLogs")
+                .equalsIgnoreCase("true")) {
+            final Class[] proxyInterfaces = new Class[]{DirContext.class};
+            long start = System.currentTimeMillis();
+
+            DirContext context = new InitialDirContext(environment);
+
+            Object proxy = Proxy.newProxyInstance(LDAPConnectionContext.class.getClassLoader(), proxyInterfaces,
+                    new LdapContextInvocationHandler(context));
+
+            long delta = System.currentTimeMillis() - start;
+
+            logDetails(start, delta, environment, "initialization", 0, "empty");
+            return (DirContext) proxy;
+        } else {
+            return new InitialDirContext(environment);
+        }
+    }
+
+    private LdapContext getLdapContext(Hashtable<?, ?> environment, Control[] connectionControls) throws NamingException {
+        if (CarbonUtils.getServerConfiguration().getFirstProperty("EnableTimingLogs")
+                .equalsIgnoreCase("true")) {
+            final Class[] proxyInterfaces = new Class[]{LdapContext.class};
+            long start = System.currentTimeMillis();
+
+            LdapContext context = new InitialLdapContext(environment, connectionControls);
+
+            Object proxy = Proxy.newProxyInstance(LDAPConnectionContext.class.getClassLoader(), proxyInterfaces,
+                    new LdapContextInvocationHandler(context));
+            long delta = System.currentTimeMillis() - start;
+
+            logDetails(start, delta, environment, "initialization", 0, "empty");
+            return (LdapContext) proxy;
+        } else {
+            return new InitialLdapContext(environment, connectionControls);
+        }
+    }
+
+    private class LdapContextInvocationHandler implements InvocationHandler {
+
+        private Object previousContext;
+
+        public LdapContextInvocationHandler(Object previousContext) {
+            this.previousContext = previousContext;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            long start = System.currentTimeMillis();
+
+            Object result = method.invoke(this.previousContext, args);
+            long delta = System.currentTimeMillis() - start;
+
+            String methodName = method.getName();
+            int argsLength = args != null ? args.length : 0;
+
+            if (!methodName.equalsIgnoreCase("close")) {
+                logDetails(start, delta, ((DirContext) this.previousContext).getEnvironment(),
+                        methodName, argsLength, stringify(args));
+
+            }
+            return result;
+        }
+
+        private String stringify(Object[] arr) {
+
+            StringBuilder sb = new StringBuilder();
+            if (arr == null) {
+                sb.append("null");
+            } else {
+                sb.append(" ");
+                for (int i = 0; i < arr.length; i++) {
+                    Object o = arr[i];
+                    sb.append(o.toString());
+                    if (i < arr.length - 1) {
+                        sb.append(",");
+                    }
+                }
+            }
+
+            return sb.toString();
+        }
+    }
+
+    private void logDetails(long start, long delta, Hashtable<?, ?> environment,
+                            String methodName, int argsLength, String args) {
+
+        String providerUrl = environment.containsKey("java.naming.provider.url") ?
+                (String) environment.get("java.naming.provider.url") : " ";
+
+        String principal = environment.containsKey("java.naming.security.principal") ?
+                (String) environment.get("java.naming.security.principal") : " ";
+
+        if (timeLog.isDebugEnabled()) {
+            Map<String, String> log = new LinkedHashMap<>();
+            log.put("callType", "ldap");
+            log.put("methodName", methodName);
+            log.put("startTime", Long.toString(start));
+            log.put("delta", Long.toString(delta) + " ms");
+            log.put("providerUrl", providerUrl);
+            log.put("principal", principal);
+            log.put("argsLength", Integer.toString(argsLength));
+            log.put("args", args);
+            timeLog.debug(toJson(log));
+        }
+    }
+
+    private String toJson(Map<String, String> map) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        Object[] keys = map.keySet().toArray();
+        for (int i = 0; i < keys.length; i++) {
+            sb.append("\"");
+            sb.append(keys[i]);
+            sb.append("\"");
+            sb.append(":");
+            sb.append("\"");
+            sb.append(map.get(keys[i]));
+            sb.append("\"");
+
+            if (i < keys.length - 1) {
+                sb.append(",");
+            }
+        }
+        sb.append("}");
+
+        return sb.toString();
     }
 }
