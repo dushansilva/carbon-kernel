@@ -61,7 +61,7 @@ public class LDAPConnectionContext {
 
     private static final String READ_TIME_OUT = "ReadTimeout";
 
-    private static final Log timeLog = LogFactory.getLog("TIME_LOG");
+    private static final Log correlationLog = LogFactory.getLog("CORRELATION_LOG");
 
     private static String initialContextFactoryClass = "com.sun.jndi.dns.DnsContextFactory";
 
@@ -441,8 +441,7 @@ public class LDAPConnectionContext {
     }
 
     private DirContext getDirContext(Hashtable<?, ?> environment) throws NamingException {
-        if (CarbonUtils.getServerConfiguration().getFirstProperty("EnableTimingLogs")
-                .equalsIgnoreCase("true")) {
+        if (System.getProperty("enableCorrelationLogs").equalsIgnoreCase("true")) {
             final Class[] proxyInterfaces = new Class[]{DirContext.class};
             long start = System.currentTimeMillis();
 
@@ -461,8 +460,7 @@ public class LDAPConnectionContext {
     }
 
     private LdapContext getLdapContext(Hashtable<?, ?> environment, Control[] connectionControls) throws NamingException {
-        if (CarbonUtils.getServerConfiguration().getFirstProperty("EnableTimingLogs")
-                .equalsIgnoreCase("true")) {
+        if (System.getProperty("enableCorrelationLogs").equalsIgnoreCase("true")) {
             final Class[] proxyInterfaces = new Class[]{LdapContext.class};
             long start = System.currentTimeMillis();
 
@@ -534,7 +532,7 @@ public class LDAPConnectionContext {
         String principal = environment.containsKey("java.naming.security.principal") ?
                 (String) environment.get("java.naming.security.principal") : " ";
 
-        if (timeLog.isDebugEnabled()) {
+        if (correlationLog.isDebugEnabled()) {
             Map<String, String> log = new LinkedHashMap<>();
             log.put("delta", Long.toString(delta) + " ms");
             log.put("callType", "ldap");
@@ -544,7 +542,7 @@ public class LDAPConnectionContext {
             log.put("principal", principal);
             log.put("argsLength", Integer.toString(argsLength));
             log.put("args", args);
-            timeLog.debug(createLogFormat(log));
+            correlationLog.debug(createLogFormat(log));
         }
     }
 
@@ -557,7 +555,6 @@ public class LDAPConnectionContext {
                 sb.append(" | ");
             }
         }
-
         return sb.toString();
     }
 }
