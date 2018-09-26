@@ -536,36 +536,27 @@ public class LDAPConnectionContext {
 
         if (timeLog.isDebugEnabled()) {
             Map<String, String> log = new LinkedHashMap<>();
-            log.put("callType", "ldap");
-            log.put("methodName", methodName);
-            log.put("startTime", Long.toString(start));
             log.put("delta", Long.toString(delta) + " ms");
+            log.put("callType", "ldap");
+            log.put("startTime", Long.toString(start));
+            log.put("methodName", methodName);
             log.put("providerUrl", providerUrl);
             log.put("principal", principal);
             log.put("argsLength", Integer.toString(argsLength));
             log.put("args", args);
-            timeLog.debug(toJson(log));
+            timeLog.debug(createLogFormat(log));
         }
     }
 
-    private String toJson(Map<String, String> map) {
+    private String createLogFormat(Map<String, String> map) {
         StringBuilder sb = new StringBuilder();
-        sb.append("{");
         Object[] keys = map.keySet().toArray();
         for (int i = 0; i < keys.length; i++) {
-            sb.append("\"");
-            sb.append(keys[i]);
-            sb.append("\"");
-            sb.append(":");
-            sb.append("\"");
             sb.append(map.get(keys[i]));
-            sb.append("\"");
-
             if (i < keys.length - 1) {
-                sb.append(",");
+                sb.append(" | ");
             }
         }
-        sb.append("}");
 
         return sb.toString();
     }
