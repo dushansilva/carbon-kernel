@@ -25,7 +25,9 @@ import org.apache.tomcat.jdbc.pool.interceptor.AbstractQueryReport;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
-import java.sql.*;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.DatabaseMetaData;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -39,7 +41,7 @@ public class CorrelationLogInterceptor extends AbstractQueryReport {
     private static final Log correlationLog = LogFactory.getLog("CORRELATION_LOG");
 
     private static final String CORRELATION_LOG_TIME_TAKEN_KEY = "delta";
-    private static final String CORRELATION_LOG_TIME_TAKEN_UNIT = " ms";
+    private static final String CORRELATION_LOG_TIME_TAKEN_UNIT = "ms";
     private static final String CORRELATION_LOG_CALL_TYPE_KEY = "callType";
     private static final String CORRELATION_LOG_CALL_TYPE_VALUE = "jdbc";
     private static final String CORRELATION_LOG_START_TIME_KEY = "startTime";
@@ -84,7 +86,6 @@ public class CorrelationLogInterceptor extends AbstractQueryReport {
 
     private Object invokeProxy(Method method, Object[] args, Object statement, long time) throws Exception {
 
-        Object result = null;
         String name = method.getName();
         String sql = null;
         Constructor<?> constructor = null;
@@ -99,10 +100,16 @@ public class CorrelationLogInterceptor extends AbstractQueryReport {
             return statement;
         }
 
-        result = constructor != null ? constructor.newInstance(new StatementProxy(statement, sql)) : null;
-        return result;
+        if (constructor != null) {
+            return constructor.newInstance(new StatementProxy(statement, sql));
+        } else {
+            return null;
+        }
     }
 
+    /**
+     * Proxy Class that is used to calculate and log the time taken for queries
+     */
     protected class StatementProxy implements InvocationHandler {
 
         protected boolean closed = false;
@@ -115,6 +122,7 @@ public class CorrelationLogInterceptor extends AbstractQueryReport {
             this.query = query;
         }
 
+        @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
 
             String name = method.getName();
@@ -130,14 +138,16 @@ public class CorrelationLogInterceptor extends AbstractQueryReport {
                     boolean process = false;
                     process = CorrelationLogInterceptor.this.isExecute(method, process);
 
-                    long start = process ? System.currentTimeMillis() : 0L;
+                    long start = System.currentTimeMillis();
                     Object result = null;
 
-                    result = this.delegate != null ? method.invoke(this.delegate, args) : null;
+                    if (this.delegate != null) {
+                        result = method.invoke(this.delegate, args);
+                    }
 
-                    long delta = process ? System.currentTimeMillis() - start : -9223372036854775808L;
-
+                    //If the query is an execute type of query the time taken is calculated and logged
                     if (process) {
+                        long delta = System.currentTimeMillis() - start;
                         CorrelationLogInterceptor.this.reportQuery(this.query, args, name, start, delta);
                         logQueryDetails(start, delta, name);
                     }
@@ -162,47 +172,43 @@ public class CorrelationLogInterceptor extends AbstractQueryReport {
          * @param delta      Time taken for query
          * @param methodName Name of the method executing
          */
-        private void logQueryDetails(long start, long delta, String methodName) {
+        private void logQueryDetails(long start, long delta, String methodName) throws SQLException {
 
-            try {
-                if (this.delegate instanceof PreparedStatement) {
-                    PreparedStatement preparedStatement = (PreparedStatement) this.delegate;
-                    if (preparedStatement.getConnection() != null) {
-                        DatabaseMetaData metaData = preparedStatement.getConnection().getMetaData();
-                        if (correlationLog.isDebugEnabled()) {
-                            Map<String, String> map = new LinkedHashMap<>();
-                            map.put(CORRELATION_LOG_TIME_TAKEN_KEY, Long.toString(delta) + CORRELATION_LOG_TIME_TAKEN_UNIT);
-                            map.put(CORRELATION_LOG_CALL_TYPE_KEY, CORRELATION_LOG_CALL_TYPE_VALUE);
-                            map.put(CORRELATION_LOG_START_TIME_KEY, Long.toString(start));
-                            map.put(CORRELATION_LOG_METHOD_NAME_KEY, methodName);
-                            map.put(CORRELATION_LOG_QUERY_KEY, this.query);
-                            map.put(CORRELATION_LOG_CONNECTION_URL_KEY, metaData.getURL());
-                            correlationLog.debug(createLogFormat(map));
-                        }
+            if (this.delegate instanceof PreparedStatement) {
+                PreparedStatement preparedStatement = (PreparedStatement) this.delegate;
+                if (preparedStatement.getConnection() != null) {
+                    DatabaseMetaData metaData = preparedStatement.getConnection().getMetaData();
+                    if (correlationLog.isDebugEnabled()) {
+                        Map<String, String> logPropertiesMap = new LinkedHashMap<>();
+                        logPropertiesMap.put(CORRELATION_LOG_TIME_TAKEN_KEY, Long.toString(delta) +
+                                " " + CORRELATION_LOG_TIME_TAKEN_UNIT);
+                        logPropertiesMap.put(CORRELATION_LOG_CALL_TYPE_KEY, CORRELATION_LOG_CALL_TYPE_VALUE);
+                        logPropertiesMap.put(CORRELATION_LOG_START_TIME_KEY, Long.toString(start));
+                        logPropertiesMap.put(CORRELATION_LOG_METHOD_NAME_KEY, methodName);
+                        logPropertiesMap.put(CORRELATION_LOG_QUERY_KEY, this.query);
+                        logPropertiesMap.put(CORRELATION_LOG_CONNECTION_URL_KEY, metaData.getURL());
+                        correlationLog.debug(createLogFormat(logPropertiesMap));
                     }
                 }
-            } catch (Exception e) {
-                log.error("Cannot get connection string ", e);
             }
         }
 
         /**
          * Creates the log line that should be printed
          *
-         * @param map contains the type and value that should be printed in the log
-         * @return the log line
+         * @param logPropertiesMap Contains the type and value that should be printed in the log
+         * @return The log line
          */
-        private String createLogFormat(Map<String, String> map) {
+        private String createLogFormat(Map<String, String> logPropertiesMap) {
 
             StringBuilder sb = new StringBuilder();
-            Object[] keys = map.keySet().toArray();
+            Object[] keys = logPropertiesMap.keySet().toArray();
             for (int i = 0; i < keys.length; i++) {
-                sb.append(map.get(keys[i]));
+                sb.append(logPropertiesMap.get(keys[i]));
                 if (i < keys.length - 1) {
                     sb.append(CORRELATION_LOG_SEPARATOR);
                 }
             }
-
             return sb.toString();
         }
     }
