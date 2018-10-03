@@ -22,6 +22,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.CarbonConstants;
 import org.wso2.carbon.user.api.RealmConfiguration;
+import org.wso2.carbon.user.core.dto.CorrelationLogDTO;
 import org.wso2.carbon.utils.Secret;
 import org.wso2.carbon.user.core.UserCoreConstants;
 import org.wso2.carbon.user.core.UserStoreException;
@@ -383,7 +384,7 @@ public class LDAPConnectionContext {
      *
      * @param userDN   user DN
      * @param password user password
-     * @return returns the LdapContext instance if credentials are valid
+     * @return returns The LdapContext instance if credentials are valid
      * @throws UserStoreException
      * @throws NamingException
      */
@@ -461,7 +462,7 @@ public class LDAPConnectionContext {
 
     /**
      * Creates the proxy for directory context and wrap the context.
-     * Calculate thte time taken for creation
+     * Calculate the time taken for creation
      *
      * @param environment Contains all the environment details
      * @return The wrapped context
@@ -480,7 +481,14 @@ public class LDAPConnectionContext {
 
             long delta = System.currentTimeMillis() - start;
 
-            logDetails(start, delta, environment, "initialization", 0, "empty");
+            CorrelationLogDTO correlationLogDTO = new CorrelationLogDTO();
+            correlationLogDTO.setStartTime(start);
+            correlationLogDTO.setDelta(delta);
+            correlationLogDTO.setEnvironment(environment);
+            correlationLogDTO.setMethodName(CORRELATION_LOG_INITIALIZATION_METHOD_NAME);
+            correlationLogDTO.setArgsLength(CORRELATION_LOG_INITIALIZATION_ARGS_LENGTH);
+            correlationLogDTO.setArgs(CORRELATION_LOG_INITIALIZATION_ARGS);
+            logDetails(correlationLogDTO);
             return (DirContext) proxy;
         } else {
             return new InitialDirContext(environment);
@@ -489,14 +497,15 @@ public class LDAPConnectionContext {
 
     /**
      * Creates the proxy for LDAP context and wrap the context.
-     * Calculate thte time taken for creation
+     * Calculate the time taken for creation
      *
      * @param environment        Contains all the environment details
      * @param connectionControls The wrapped context
-     * @return
+     * @return ldap connection context
      * @throws NamingException
      */
-    private LdapContext getLdapContext(Hashtable<?, ?> environment, Control[] connectionControls) throws NamingException {
+    private LdapContext getLdapContext(Hashtable<?, ?> environment, Control[] connectionControls)
+            throws NamingException {
 
         if (Boolean.parseBoolean(System.getProperty(CORRELATION_LOG_SYSTEM_PROPERTY))) {
             final Class[] proxyInterfaces = new Class[]{LdapContext.class};
@@ -506,10 +515,17 @@ public class LDAPConnectionContext {
 
             Object proxy = Proxy.newProxyInstance(LDAPConnectionContext.class.getClassLoader(), proxyInterfaces,
                     new LdapContextInvocationHandler(context));
+
             long delta = System.currentTimeMillis() - start;
 
-            logDetails(start, delta, environment, CORRELATION_LOG_INITIALIZATION_METHOD_NAME,
-                    CORRELATION_LOG_INITIALIZATION_ARGS_LENGTH, CORRELATION_LOG_INITIALIZATION_ARGS);
+            CorrelationLogDTO correlationLogDTO = new CorrelationLogDTO();
+            correlationLogDTO.setStartTime(start);
+            correlationLogDTO.setDelta(delta);
+            correlationLogDTO.setEnvironment(environment);
+            correlationLogDTO.setMethodName(CORRELATION_LOG_INITIALIZATION_METHOD_NAME);
+            correlationLogDTO.setArgsLength(CORRELATION_LOG_INITIALIZATION_ARGS_LENGTH);
+            correlationLogDTO.setArgs(CORRELATION_LOG_INITIALIZATION_ARGS);
+            logDetails(correlationLogDTO);
             return (LdapContext) proxy;
         } else {
             return new InitialLdapContext(environment, connectionControls);
@@ -517,7 +533,7 @@ public class LDAPConnectionContext {
     }
 
     /**
-     * Proxy Classthat is used to calculate and log the time taken for queries
+     * Proxy Class that is used to calculate and log the time taken for queries
      */
     private class LdapContextInvocationHandler implements InvocationHandler {
 
@@ -532,23 +548,31 @@ public class LDAPConnectionContext {
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
 
             long start = System.currentTimeMillis();
-
             Object result = method.invoke(this.previousContext, args);
             long delta = System.currentTimeMillis() - start;
-
             String methodName = method.getName();
-            int argsLength = args != null ? args.length : 0;
+            int argsLength = 0;
 
-            if (methodName != null && !methodName.equalsIgnoreCase("close")) {
-                logDetails(start, delta, ((DirContext) this.previousContext).getEnvironment(),
-                        methodName, argsLength, stringify(args));
+            if (args != null) {
+                argsLength = args.length;
+            }
 
+            if (!StringUtils.equalsIgnoreCase("close", methodName)) {
+                CorrelationLogDTO correlationLogDTO = new CorrelationLogDTO();
+                correlationLogDTO.setStartTime(start);
+                correlationLogDTO.setDelta(delta);
+                correlationLogDTO.setEnvironment(((DirContext) this.previousContext).getEnvironment());
+                correlationLogDTO.setMethodName(methodName);
+                correlationLogDTO.setArgsLength(argsLength);
+                correlationLogDTO.setArgs(stringify(args));
+                logDetails(correlationLogDTO);
             }
             return result;
         }
 
         /**
          * Creates a argument string by appending the values in the array
+         *
          * @param arr Arguments
          * @return Argument string
          */
@@ -567,7 +591,6 @@ public class LDAPConnectionContext {
                     }
                 }
             }
-
             return sb.toString();
         }
     }
@@ -575,17 +598,11 @@ public class LDAPConnectionContext {
     /**
      * Logs the details from the LDAP query
      *
-     * @param start       Start time
-     * @param delta       Time taken
-     * @param environment Contains all the environment details
-     * @param methodName  Method that executed
-     * @param argsLength  Arguments length
-     * @param args        Arguments passed
+     * @param correlationLogDTO Contains all details that should be to logged
      */
-    private void logDetails(long start, long delta, Hashtable<?, ?> environment,
-                            String methodName, int argsLength, String args) {
+    private void logDetails(CorrelationLogDTO correlationLogDTO) {
 
-        String providerUrl = environment.containsKey("java.naming.provider.url") ?
+        String providerUrl = correlationLogDTO.getEnvironment().containsKey("java.naming.provider.url") ?
                 (String) environment.get("java.naming.provider.url") : " ";
 
         String principal = environment.containsKey("java.naming.security.principal") ?
@@ -593,14 +610,15 @@ public class LDAPConnectionContext {
 
         if (correlationLog.isDebugEnabled()) {
             Map<String, String> map = new LinkedHashMap<>();
-            map.put(CORRELATION_LOG_TIME_TAKEN_KEY, Long.toString(delta) + CORRELATION_LOG_TIME_TAKEN_UNIT);
+            map.put(CORRELATION_LOG_TIME_TAKEN_KEY, Long.toString(correlationLogDTO.getDelta()) +
+                    CORRELATION_LOG_TIME_TAKEN_UNIT);
             map.put(CORRELATION_LOG_CALL_TYPE_KEY, CORRELATION_LOG_CALL_TYPE_VALUE);
-            map.put(CORRELATION_LOG_START_TIME_KEY, Long.toString(start));
-            map.put(CORRELATION_LOG_METHOD_NAME_KEY, methodName);
+            map.put(CORRELATION_LOG_START_TIME_KEY, Long.toString(correlationLogDTO.getStartTime()));
+            map.put(CORRELATION_LOG_METHOD_NAME_KEY, correlationLogDTO.getMethodName());
             map.put(CORRELATION_LOG_PROVIDER_URL_KEY, providerUrl);
             map.put(CORRELATION_LOG_PRINCIPAL_KEY, principal);
-            map.put(CORRELATION_LOG_ARGS_KEY, Integer.toString(argsLength));
-            map.put(CORRELATION_LOG_ARGS_LENGTH_KEY, args);
+            map.put(CORRELATION_LOG_ARGS_LENGTH_KEY, Integer.toString(correlationLogDTO.getArgsLength()));
+            map.put(CORRELATION_LOG_ARGS_KEY, correlationLogDTO.getArgs());
             correlationLog.debug(createLogFormat(map));
         }
     }
@@ -608,8 +626,8 @@ public class LDAPConnectionContext {
     /**
      * Creates the log line that should be printed
      *
-     * @param map contains the type and value that should be printed in the log
-     * @return the log line
+     * @param map Contains the type and value that should be printed in the log
+     * @return The log line
      */
     private String createLogFormat(Map<String, String> map) {
 
