@@ -61,6 +61,7 @@ public class RDBMSDataSource {
 		if (jdbcInterceptors == null) {
 			jdbcInterceptors = "";
 		}
+		//Correlation log interceptor is added to the interceptor chain
 		jdbcInterceptors = RDBMSDataSourceConstants.STANDARD_JDBC_INTERCEPTORS + jdbcInterceptors
 		+ RDBMSDataSourceConstants.CORRELATION_LOG_INTERCEPTOR;
 		this.poolProperties.setJdbcInterceptors(jdbcInterceptors);

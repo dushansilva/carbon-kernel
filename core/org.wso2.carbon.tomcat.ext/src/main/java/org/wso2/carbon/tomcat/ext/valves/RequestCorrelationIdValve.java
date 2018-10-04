@@ -29,6 +29,7 @@ import org.apache.log4j.MDC;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,7 +45,8 @@ import javax.servlet.http.HttpServletRequest;
  * <p>
  * The header and MDC can be configured in tomcat valve configuration like,
  * <code>
- *
+ * headerToCorrelationIdMapping={'activityid':'Correlation-ID'}
+ * queryToCorrelationIdMapping={'RelayState':'Correlation-ID'}
  * </code>
  */
 public class RequestCorrelationIdValve extends ValveBase {
@@ -82,12 +84,16 @@ public class RequestCorrelationIdValve extends ValveBase {
     public void invoke(Request request, Response response) throws IOException, ServletException {
 
         try {
-            associateHeadersToThread(request);
-            if (MDC.get(correlationIdMdc) == null) {
-                associateQueryParamsToThread(request);
+            Map<String, String> associateToThreadMap = new HashMap<>();
+            associateToThreadMap.putAll(getHeadersToAssociate(request));
+            if (associateToThreadMap.size() == 0) {
+                associateToThreadMap.putAll(getQueryParamsToAssociate(request));
             }
-            if (MDC.get(correlationIdMdc) == null) {
-                MDC.put(correlationIdMdc, UUID.randomUUID().toString());
+
+            if (associateToThreadMap.size() == 0) {
+                associateToThread(UUID.randomUUID().toString());
+            } else {
+                associateToThread(associateToThreadMap);
             }
             getNext().invoke(request, response);
         } finally {
@@ -97,9 +103,30 @@ public class RequestCorrelationIdValve extends ValveBase {
     }
 
     /**
+     * Associate all match correlation id values to thread
+     *
+     * @param toAssociate All match headers/query and values
+     */
+    private void associateToThread(Map<String, String> toAssociate) {
+
+        for (Map.Entry<String, String> entry : toAssociate.entrySet()) {
+            MDC.put(entry.getKey(), entry.getValue());
+        }
+    }
+
+    /**
+     * Associate a random correlation id value to thread
+     *
+     * @param generatedValue Randomly generated UUID
+     */
+    private void associateToThread(String generatedValue) {
+
+        MDC.put(correlationIdMdc, generatedValue);
+    }
+
+    /**
      * Remove all headers values associated with the thread.
      */
-
     private void disAssociateFromThread() {
 
         if (toRemoveFromThread != null) {
@@ -110,89 +137,112 @@ public class RequestCorrelationIdValve extends ValveBase {
     }
 
     /**
-     * Search though the list of query params configured against query params received.
+     * Search through the list of query params configured against query params received.
      *
-     * @param servletRequest request received
+     * @param servletRequest Request received
+     * @return A map which contains all the query and values that should be associated to the thread
      */
-    private void associateQueryParamsToThread(ServletRequest servletRequest) {
+    private Map<String, String> getQueryParamsToAssociate(ServletRequest servletRequest) {
 
+        Map<String, String> queryToAssociate = new HashMap<>();
         if (queryToIdMapping != null && (servletRequest instanceof HttpServletRequest)) {
             HttpServletRequest httpServletRequest = (HttpServletRequest) servletRequest;
 
             for (Map.Entry<String, String> entry : queryToIdMapping.entrySet()) {
                 String queryConfigured = entry.getKey();
                 String correlationIdName = entry.getValue();
-                if (StringUtils.isNotEmpty(queryConfigured) && StringUtils.isNotEmpty(correlationIdName)) {
-                    Enumeration<String> parameterNames = httpServletRequest.getParameterNames();
-                    while (parameterNames.hasMoreElements()) {
-                        String queryReceived = parameterNames.nextElement();
-                        setQueryCorrelationIdValue(queryReceived, queryConfigured, httpServletRequest, correlationIdName);
-                    }
+                if (StringUtils.isEmpty(queryConfigured) && StringUtils.isEmpty(correlationIdName)) {
+                    continue;
+                }
+
+                Enumeration<String> parameterNames = httpServletRequest.getParameterNames();
+                while (parameterNames.hasMoreElements()) {
+                    String queryReceived = parameterNames.nextElement();
+                    queryToAssociate.putAll(getQueryCorrelationIdValue(queryReceived, queryConfigured,
+                            httpServletRequest, correlationIdName));
                 }
             }
         }
+        return queryToAssociate;
     }
 
     /**
-     * Search though the list of headers configured against headers received.
+     * Search through the list of headers configured against headers received.
      *
-     * @param servletRequest request received
+     * @param servletRequest Request received
+     * @return A map which contains all the headers and values that should be associated to the thread
      */
-    private void associateHeadersToThread(ServletRequest servletRequest) {
+    private Map<String, String> getHeadersToAssociate(ServletRequest servletRequest) {
 
+        Map<String, String> headersToAssociate = new HashMap<>();
         if (headerToIdMapping != null && (servletRequest instanceof HttpServletRequest)) {
             HttpServletRequest httpServletRequest = (HttpServletRequest) servletRequest;
 
             for (Map.Entry<String, String> entry : headerToIdMapping.entrySet()) {
                 String headerConfigured = entry.getKey();
                 String correlationIdName = entry.getValue();
-                if (StringUtils.isNotEmpty(headerConfigured) && StringUtils.isNotEmpty(correlationIdName)) {
-                    Enumeration<String> headerNames = httpServletRequest.getHeaderNames();
-                    while (headerNames.hasMoreElements()) {
-                        String headerReceived = headerNames.nextElement();
-                        setHeaderCorrelationIdValue(headerReceived, headerConfigured, httpServletRequest, correlationIdName);
-                    }
+                if (StringUtils.isEmpty(headerConfigured) && StringUtils.isEmpty(correlationIdName)) {
+                    continue;
+                }
+
+                Enumeration<String> headerNames = httpServletRequest.getHeaderNames();
+                while (headerNames.hasMoreElements()) {
+                    String headerReceived = headerNames.nextElement();
+                    headersToAssociate.putAll(getHeaderCorrelationIdValue(headerReceived, headerConfigured,
+                            httpServletRequest, correlationIdName));
                 }
             }
         }
+        return headersToAssociate;
     }
 
     /**
-     * Set correlationId value received via header to the thread
+     * Check if configured header for correlation Id matches the received header and get the header value
      *
-     * @param headerReceived     header received in request
-     * @param headerConfigured   header configured in the valve
-     * @param httpServletRequest request received
-     * @param correlationIdName  correlationId
+     * @param headerReceived     Header received in request
+     * @param headerConfigured   Header configured in the valve
+     * @param httpServletRequest Request received
+     * @param correlationIdName  Correlation Id
+     * @return A map which contains a header and value that should be associated to the thread
      */
-    private void setHeaderCorrelationIdValue(String headerReceived, String headerConfigured,
-                                             HttpServletRequest httpServletRequest, String correlationIdName) {
+    private Map<String, String> getHeaderCorrelationIdValue(String headerReceived, String headerConfigured,
+                                                            HttpServletRequest httpServletRequest, String correlationIdName) {
 
-        if (StringUtils.isNotEmpty(headerReceived) && headerReceived.equalsIgnoreCase(headerConfigured)) {
-            String headerValue = httpServletRequest.getHeader(headerReceived);
-            if (StringUtils.isNotEmpty(headerValue)) {
-                MDC.put(correlationIdName, headerValue);
-            }
+        Map<String, String> headersToAssociate = new HashMap<>();
+        if (StringUtils.isEmpty(headerReceived) || !StringUtils.equalsIgnoreCase(headerReceived, headerConfigured)) {
+            return headersToAssociate;
         }
+
+        String headerValue = httpServletRequest.getHeader(headerReceived);
+        if (StringUtils.isNotEmpty(headerValue)) {
+            headersToAssociate.put(correlationIdName, headerValue);
+        }
+        return headersToAssociate;
     }
 
     /**
-     * Set correlationId value received via query param to the thread
+     * Check if configured query for correlation Id matches the received query and get the header value
      *
-     * @param queryReceived      query received in request
-     * @param queryConfigured    query configured in the valv
-     * @param httpServletRequest request received
-     * @param correlationIdName  correlationId
+     * @param queryReceived      Query received in request
+     * @param queryConfigured    Query configured in the valve
+     * @param httpServletRequest Request received
+     * @param correlationIdName  Correlation Id
+     * @return A map which contains a query and value that should be associated to the thread
      */
-    private void setQueryCorrelationIdValue(String queryReceived, String queryConfigured,
-                                            HttpServletRequest httpServletRequest, String correlationIdName) {
+    private Map<String, String> getQueryCorrelationIdValue(String queryReceived, String queryConfigured,
+                                                           HttpServletRequest httpServletRequest, String correlationIdName) {
 
-        if (StringUtils.isNotEmpty(queryReceived) && queryReceived.equalsIgnoreCase(queryConfigured)) {
-            String queryValue = httpServletRequest.getParameter(queryReceived);
-            if (StringUtils.isNotEmpty(queryValue)) {
-                MDC.put(correlationIdName, queryValue);
-            }
+        Map<String, String> queryToAssociate = new HashMap<>();
+
+        if (StringUtils.isEmpty(queryReceived) || !StringUtils.equalsIgnoreCase(queryReceived, queryConfigured)) {
+            return queryToAssociate;
         }
+
+        String queryValue = httpServletRequest.getParameter(queryReceived);
+        if (StringUtils.isNotEmpty(queryValue)) {
+            queryToAssociate.put(correlationIdName, queryValue);
+        }
+        return queryToAssociate;
     }
 
     public void setHeaderToCorrelationIdMapping(String headerToCorrelationIdMapping) {
