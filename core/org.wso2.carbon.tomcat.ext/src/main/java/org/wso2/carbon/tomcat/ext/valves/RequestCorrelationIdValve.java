@@ -145,22 +145,23 @@ public class RequestCorrelationIdValve extends ValveBase {
     private Map<String, String> getQueryParamsToAssociate(ServletRequest servletRequest) {
 
         Map<String, String> queryToAssociate = new HashMap<>();
-        if (queryToIdMapping != null && (servletRequest instanceof HttpServletRequest)) {
-            HttpServletRequest httpServletRequest = (HttpServletRequest) servletRequest;
+        if (queryToIdMapping == null || !(servletRequest instanceof HttpServletRequest)) {
+            return queryToAssociate;
+        }
 
-            for (Map.Entry<String, String> entry : queryToIdMapping.entrySet()) {
-                String queryConfigured = entry.getKey();
-                String correlationIdName = entry.getValue();
-                if (StringUtils.isEmpty(queryConfigured) && StringUtils.isEmpty(correlationIdName)) {
-                    continue;
-                }
+        HttpServletRequest httpServletRequest = (HttpServletRequest) servletRequest;
+        for (Map.Entry<String, String> entry : queryToIdMapping.entrySet()) {
+            String queryConfigured = entry.getKey();
+            String correlationIdName = entry.getValue();
+            if (StringUtils.isEmpty(queryConfigured) && StringUtils.isEmpty(correlationIdName)) {
+                continue;
+            }
 
-                Enumeration<String> parameterNames = httpServletRequest.getParameterNames();
-                while (parameterNames.hasMoreElements()) {
-                    String queryReceived = parameterNames.nextElement();
-                    queryToAssociate.putAll(getQueryCorrelationIdValue(queryReceived, queryConfigured,
-                            httpServletRequest, correlationIdName));
-                }
+            Enumeration<String> parameterNames = httpServletRequest.getParameterNames();
+            while (parameterNames.hasMoreElements()) {
+                String queryReceived = parameterNames.nextElement();
+                queryToAssociate.putAll(getQueryCorrelationIdValue(queryReceived, queryConfigured,
+                        httpServletRequest, correlationIdName));
             }
         }
         return queryToAssociate;
@@ -175,22 +176,23 @@ public class RequestCorrelationIdValve extends ValveBase {
     private Map<String, String> getHeadersToAssociate(ServletRequest servletRequest) {
 
         Map<String, String> headersToAssociate = new HashMap<>();
-        if (headerToIdMapping != null && (servletRequest instanceof HttpServletRequest)) {
-            HttpServletRequest httpServletRequest = (HttpServletRequest) servletRequest;
+        if (headerToIdMapping == null || !(servletRequest instanceof HttpServletRequest)) {
+            return headersToAssociate;
+        }
 
-            for (Map.Entry<String, String> entry : headerToIdMapping.entrySet()) {
-                String headerConfigured = entry.getKey();
-                String correlationIdName = entry.getValue();
-                if (StringUtils.isEmpty(headerConfigured) && StringUtils.isEmpty(correlationIdName)) {
-                    continue;
-                }
+        HttpServletRequest httpServletRequest = (HttpServletRequest) servletRequest;
+        for (Map.Entry<String, String> entry : headerToIdMapping.entrySet()) {
+            String headerConfigured = entry.getKey();
+            String correlationIdName = entry.getValue();
+            if (StringUtils.isEmpty(headerConfigured) && StringUtils.isEmpty(correlationIdName)) {
+                continue;
+            }
 
-                Enumeration<String> headerNames = httpServletRequest.getHeaderNames();
-                while (headerNames.hasMoreElements()) {
-                    String headerReceived = headerNames.nextElement();
-                    headersToAssociate.putAll(getHeaderCorrelationIdValue(headerReceived, headerConfigured,
-                            httpServletRequest, correlationIdName));
-                }
+            Enumeration<String> headerNames = httpServletRequest.getHeaderNames();
+            while (headerNames.hasMoreElements()) {
+                String headerReceived = headerNames.nextElement();
+                headersToAssociate.putAll(getHeaderCorrelationIdValue(headerReceived, headerConfigured,
+                        httpServletRequest, correlationIdName));
             }
         }
         return headersToAssociate;

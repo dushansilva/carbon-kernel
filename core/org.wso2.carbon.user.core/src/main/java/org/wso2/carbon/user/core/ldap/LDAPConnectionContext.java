@@ -602,11 +602,16 @@ public class LDAPConnectionContext {
      */
     private void logDetails(CorrelationLogDTO correlationLogDTO) {
 
-        String providerUrl = correlationLogDTO.getEnvironment().containsKey("java.naming.provider.url") ?
-                (String) environment.get("java.naming.provider.url") : " ";
+        String providerUrl = " ";
+        String principal = " ";
 
-        String principal = environment.containsKey("java.naming.security.principal") ?
-                (String) environment.get("java.naming.security.principal") : " ";
+        if (correlationLogDTO.getEnvironment().containsKey("java.naming.provider.url")) {
+            providerUrl = (String) environment.get("java.naming.provider.url");
+        }
+
+        if (environment.containsKey("java.naming.security.principal")) {
+            principal = (String) environment.get("java.naming.security.principal");
+        }
 
         if (correlationLog.isDebugEnabled()) {
             Map<String, String> map = new LinkedHashMap<>();
